@@ -1,5 +1,6 @@
 // Backend API Server for Email Notifications
 // Uses Nodemailer with Gmail SMTP (works immediately, no domain verification needed)
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
@@ -11,8 +12,8 @@ const PORT = process.env.PORT || 3001;
 // Gmail SMTP Configuration
 // You can use your Gmail account or create an App Password
 // To create App Password: Google Account → Security → 2-Step Verification → App Passwords
-const GMAIL_USER = 'debsaptarshi628@gmail.com'; // Your Gmail address
-const GMAIL_APP_PASSWORD = 'ibpuailqtknxsepv'; // Gmail App Password (spaces removed)
+const GMAIL_USER = process.env.GMAIL_USER || 'debsaptarshi628@gmail.com';
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || 'ibpuailqtknxsepv';
 
 // Create Nodemailer transporter
 const transporter = nodemailer.createTransport({
@@ -24,7 +25,27 @@ const transporter = nodemailer.createTransport({
 });
 
 // Middleware
-app.use(cors());
+// Allow CORS from Netlify frontend and localhost for development
+const allowedOrigins = [
+  'https://seniorpill.netlify.app',
+  'http://localhost:3000',
+  'http://localhost:5173', // Vite default port
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all origins for now (can restrict later)
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 console.log('📧 Email Notification Server Initialized');

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: seniorpill-email-server
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        value: pill-81bf4
+      - key: FIREBASE_API_KEY
+        value: AIzaSyBwDWBlbqBi2rfrjOXhvab55u73dO0LVGI
