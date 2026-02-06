@@ -25,6 +25,205 @@ import { format, parse, differenceInSeconds } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useRef } from 'react';
 
+// ==========================
+// Simple ML Helper Functions
+// ==========================
+
+// Logistic function
+const sigmoid = (z) => {
+  if (z < -50) return 0;
+  if (z > 50) return 1;
+  return 1 / (1 + Math.exp(-z));
+};
+
+// Build simple behaviour stats from dose logs
+const buildBehaviourStats = (doseLogs) => {
+  if (!doseLogs || doseLogs.length === 0) {
+    return {
+      totalTaken: 0,
+      totalMissed: 0,
+      missRate: 0,
+      avgDelayMinutes: 0,
+      recentMisses: 0
+    };
+  }
+
+  let totalTaken = 0;
+  let totalMissed = 0;
+  let delaySumMinutes = 0;
+  let delayCount = 0;
+
+  const now = new Date();
+  let recentMisses = 0; // last 7 days
+
+  doseLogs.forEach((log) => {
+    if (log.status === 'taken') totalTaken += 1;
+    if (log.status === 'missed') totalMissed += 1;
+
+    // delaySeconds (new) or delayMinutes (old)
+    const delaySeconds = log.delaySeconds || (log.delayMinutes ? log.delayMinutes * 60 : 0);
+    if (delaySeconds > 0) {
+      delaySumMinutes += delaySeconds / 60;
+      delayCount += 1;
+    }
+
+    const logDate = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.createdAt);
+    const diffDays = (now - logDate) / (1000 * 60 * 60 * 24);
+    if (log.status === 'missed' && diffDays <= 7) {
+      recentMisses += 1;
+    }
+  });
+
+  const total = totalTaken + totalMissed;
+  const missRate = total > 0 ? totalMissed / total : 0;
+  const avgDelayMinutes = delayCount > 0 ? delaySumMinutes / delayCount : 0;
+
+  return {
+    totalTaken,
+    totalMissed,
+    missRate,
+    avgDelayMinutes,
+    recentMisses
+  };
+};
+
+// 1️⃣ Logistic Regression style: predict chance of missing next dose
+const predictMissProbability = (behaviourStats, periodAdherence) => {
+  const missRate = behaviourStats.missRate || 0;
+  const avgDelay = behaviourStats.avgDelayMinutes || 0;
+  const recentMisses = behaviourStats.recentMisses || 0;
+  const adherencePct = periodAdherence?.percentage ?? 100;
+
+  // Features:
+  //  - missRate ↑  → higher chance to miss
+  //  - avgDelay ↑  → higher chance to miss
+  //  - adherencePct ↓ → higher chance to miss
+  //  - recentMisses ≥ 3 → boost risk
+  const xMissRate = missRate; // 0–1
+  const xDelay = Math.min(avgDelay / 30, 2); // normalise
+  const xAdh = 1 - adherencePct / 100; // 0 low risk, 1 high risk
+  const xRecent = recentMisses >= 3 ? 1 : 0;
+
+  const z =
+    -0.5 + // bias
+    2.5 * xMissRate +
+    0.8 * xDelay +
+    1.5 * xAdh +
+    1.2 * xRecent;
+
+  const prob = sigmoid(z);
+
+  let level = 'Low';
+  if (prob >= 0.7) level = 'High';
+  else if (prob >= 0.4) level = 'Medium';
+
+  return {
+    probability: prob,
+    level
+  };
+};
+
+// 2️⃣ Linear Regression style: predict days until refill based on simple linear usage
+const predictRefillDays = (currentCount, behaviourStats) => {
+  const totalDoses = behaviourStats.totalTaken + behaviourStats.totalMissed;
+  if (!currentCount || currentCount <= 0 || totalDoses === 0) {
+    return null;
+  }
+
+  // Approximate daily dose demand using last 7 days worth of logs
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  let last7 = 0;
+
+  // behaviourStats doesn't store per-log timing, so fall back to a simple heuristic:
+  // assume 2 planned doses per day (morning + evening), scale by missRate.
+  const plannedPerDay = 2;
+  const adherenceFactor = 1 - (behaviourStats.missRate || 0);
+  const expectedDailyUse = Math.max(plannedPerDay * adherenceFactor, 0.25);
+
+  const estimatedDays = currentCount / expectedDailyUse;
+
+  // Clip to a reasonable range
+  const days = Math.max(1, Math.min(60, Math.round(estimatedDays)));
+  return days;
+};
+
+// 3️⃣ Decision Tree: explainable risk classification
+const classifyRiskLevel = (behaviourStats, periodAdherence) => {
+  const missed = periodAdherence?.missed ?? behaviourStats.totalMissed;
+  const adherencePct = periodAdherence?.percentage ?? 100;
+  const avgDelay = behaviourStats.avgDelayMinutes || 0;
+
+  // Simple, transparent rules
+  if (missed >= 4 || (missed >= 3 && avgDelay > 20) || adherencePct < 60) {
+    return {
+      level: 'High',
+      message: 'High non-adherence risk – frequent misses and long delays.'
+    };
+  }
+
+  if (missed >= 2 || avgDelay > 10 || adherencePct < 80) {
+    return {
+      level: 'Medium',
+      message: 'Moderate risk – some missed doses or consistent delays.'
+    };
+  }
+
+  return {
+    level: 'Low',
+    message: 'Low risk – good adherence with minimal delays.'
+  };
+};
+
+// 4️⃣ K-Means-style clustering: behaviour grouping into Regular / Irregular / High-risk
+const assignBehaviourCluster = (behaviourStats, periodAdherence) => {
+  const adherencePct = periodAdherence?.percentage ?? 100;
+  const avgDelay = behaviourStats.avgDelayMinutes || 0;
+  const missed = periodAdherence?.missed ?? behaviourStats.totalMissed;
+
+  // Feature vector: [adherence%, avgDelayMinutes, missedCount]
+  const x = [adherencePct, avgDelay, missed];
+
+  // Fixed "centroids" representing 3 intuitive clusters
+  const centroids = [
+    { label: 'Regular', vector: [95, 3, 0] },
+    { label: 'Irregular', vector: [80, 10, 2] },
+    { label: 'High-risk', vector: [55, 25, 5] }
+  ];
+
+  const distance = (a, b) => {
+    const dx0 = (a[0] - b[0]) / 50;
+    const dx1 = (a[1] - b[1]) / 30;
+    const dx2 = (a[2] - b[2]) / 5;
+    return Math.sqrt(dx0 * dx0 + dx1 * dx1 + dx2 * dx2);
+  };
+
+  let best = centroids[0];
+  let bestDist = distance(x, centroids[0].vector);
+
+  for (let i = 1; i < centroids.length; i++) {
+    const d = distance(x, centroids[i].vector);
+    if (d < bestDist) {
+      best = centroids[i];
+      bestDist = d;
+    }
+  }
+
+  let description = '';
+  if (best.label === 'Regular') {
+    description = 'Consistent, regular medication behaviour.';
+  } else if (best.label === 'Irregular') {
+    description = 'Irregular behaviour – mixed taken and missed doses.';
+  } else {
+    description = 'High-risk behaviour – frequent misses and long delays.';
+  }
+
+  return {
+    label: best.label,
+    description
+  };
+};
+
 const CaregiverDashboard = ({ user, setUser }) => {
   const [patientId, setPatientId] = useState('');
   const [settings, setSettings] = useState(null);
@@ -52,6 +251,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
   const [customUID, setCustomUID] = useState('');
   const [activeReminder, setActiveReminder] = useState(null); // { type: 'morning'|'evening', time: Date, patientId: string }
   const unsubscribeRefs = useRef({ settings: null, logs: null });
+  const [mlInsights, setMlInsights] = useState(null);
 
   // Removed auto-load on patientId change - now manual load only
 
@@ -270,6 +470,35 @@ const CaregiverDashboard = ({ user, setUser }) => {
         const weekStats = await calculateAdherence(pid, 'week');
         const monthStats = await calculateAdherence(pid, 'month');
         setAdherence({ week: weekStats, month: monthStats });
+
+        // ==========================
+        // AI / ML Insight Computation
+        // ==========================
+        const behaviourStats = buildBehaviourStats(logs);
+        const missPred = predictMissProbability(behaviourStats, weekStats);
+        const refillMorning = predictRefillDays(
+          settingsRef.current?.morningPillCount || 0,
+          behaviourStats
+        );
+        const refillEvening = predictRefillDays(
+          settingsRef.current?.eveningPillCount || 0,
+          behaviourStats
+        );
+        const risk = classifyRiskLevel(behaviourStats, weekStats);
+        const cluster = assignBehaviourCluster(behaviourStats, weekStats);
+
+        setMlInsights({
+          behaviourStats,
+          weekStats,
+          monthStats,
+          missPrediction: missPred,
+          refillPrediction: {
+            morningDays: refillMorning,
+            eveningDays: refillEvening
+          },
+          risk,
+          cluster
+        });
       });
 
       // Set patientId for reminder checking
@@ -813,17 +1042,17 @@ const CaregiverDashboard = ({ user, setUser }) => {
     <Layout user={user} setUser={setUser} title="Caregiver Dashboard">
       <div className="space-y-6">
         {/* Patient Management Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
           <div className="flex justify-between items-center mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Patient Management</h2>
-              <p className="text-xs text-gray-500 mt-1">
+              <h2 className="text-lg font-semibold text-slate-50">Patient Management</h2>
+              <p className="text-xs text-slate-400 mt-1">
                 Load existing patient or create a new patient account
               </p>
             </div>
             <button
               onClick={() => setShowNewPatientForm(!showNewPatientForm)}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-slate-900 bg-emerald-400 rounded-lg hover:bg-emerald-300 transition-colors shadow-md shadow-emerald-900/40"
             >
               {showNewPatientForm ? 'Cancel' : '+ Create New Patient'}
             </button>
@@ -831,11 +1060,11 @@ const CaregiverDashboard = ({ user, setUser }) => {
 
           {/* Create New Patient Form */}
           {showNewPatientForm && (
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <h3 className="text-md font-semibold text-gray-900 mb-4">Create New Patient Account</h3>
+            <div className="mb-6 p-4 rounded-lg border border-emerald-500/40 bg-emerald-950/40">
+              <h3 className="text-md font-semibold text-slate-50 mb-4">Create New Patient Account</h3>
               <form onSubmit={handleCreateNewPatient} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-slate-200 mb-2">
                     Patient Email <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -844,12 +1073,12 @@ const CaregiverDashboard = ({ user, setUser }) => {
                     onChange={(e) => setNewPatientForm({ ...newPatientForm, email: e.target.value })}
                     required
                     placeholder="patient@example.com"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                    className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 outline-none"
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-slate-200 mb-2">
                       Password <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -859,11 +1088,11 @@ const CaregiverDashboard = ({ user, setUser }) => {
                       required
                       minLength={6}
                       placeholder="Minimum 6 characters"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                      className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-slate-200 mb-2">
                       Confirm Password <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -873,14 +1102,14 @@ const CaregiverDashboard = ({ user, setUser }) => {
                       required
                       minLength={6}
                       placeholder="Re-enter password"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                      className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 outline-none"
                     />
                   </div>
                 </div>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-6 py-2 bg-emerald-500 text-slate-950 rounded-lg hover:bg-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-emerald-900/50"
                 >
                   {loading ? 'Creating...' : 'Create Patient Account'}
                 </button>
@@ -890,10 +1119,10 @@ const CaregiverDashboard = ({ user, setUser }) => {
 
           {/* Load Existing Patient */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-slate-200 mb-2">
               Load Existing Patient
             </label>
-            <p className="text-xs text-gray-500 mb-3">
+            <p className="text-xs text-slate-500 mb-3">
               Enter the custom Patient ID (e.g., U1, U101) to view their data.
             </p>
             <div className="flex space-x-4">
@@ -907,12 +1136,12 @@ const CaregiverDashboard = ({ user, setUser }) => {
                   }
                 }}
                 placeholder="Enter custom Patient ID (e.g., U1, U101)"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+                className="flex-1 px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500 focus:border-sky-400 outline-none"
               />
               <button
                 onClick={() => checkPatientExists(patientId)}
                 disabled={loading || !patientId.trim()}
-                className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2 bg-sky-500 text-slate-950 rounded-lg hover:bg-sky-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-sky-900/50"
               >
                 {loading ? 'Loading...' : 'Load Patient'}
               </button>
@@ -922,16 +1151,16 @@ const CaregiverDashboard = ({ user, setUser }) => {
 
         {/* Assign Custom UID Dialog */}
         {showCustomUIDDialog && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Assign Custom Patient ID</h3>
-              <p className="text-sm text-gray-600 mb-4">
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+            <div className="bg-slate-950 border border-slate-800 rounded-xl shadow-[0_0_45px_rgba(15,23,42,0.9)] p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-slate-50 mb-4">Assign Custom Patient ID</h3>
+              <p className="text-sm text-slate-400 mb-4">
                 Patient account created successfully! Please assign a custom Patient ID (e.g., U1, U101).
                 <br /><br />
                 This ID will be used to identify the patient in the system.
               </p>
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-200 mb-2">
                   Custom Patient ID <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -944,16 +1173,16 @@ const CaregiverDashboard = ({ user, setUser }) => {
                     }
                   }}
                   placeholder="e.g., U1, U101"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+                  className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500 focus:border-sky-400 outline-none"
                   autoFocus
                 />
-                <p className="text-xs text-gray-500 mt-2">Format: U followed by numbers (e.g., U1, U101)</p>
+                <p className="text-xs text-slate-500 mt-2">Format: U followed by numbers (e.g., U1, U101)</p>
               </div>
               <div className="flex space-x-4">
                 <button
                   onClick={handleAssignCustomUID}
                   disabled={loading || !customUID.trim()}
-                  className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 px-4 py-2 bg-sky-500 text-slate-950 rounded-lg hover:bg-sky-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-sky-900/50"
                 >
                   {loading ? 'Assigning...' : 'Assign & Continue'}
                 </button>
@@ -964,7 +1193,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
                     setNewPatientFirebaseUID('');
                   }}
                   disabled={loading}
-                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-slate-800 text-slate-200 rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -975,10 +1204,10 @@ const CaregiverDashboard = ({ user, setUser }) => {
 
         {/* Create Settings Dialog */}
         {showCreateDialog && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Patient Settings?</h3>
-              <p className="text-sm text-gray-600 mb-6">
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+            <div className="bg-slate-950 border border-slate-800 rounded-xl shadow-[0_0_45px_rgba(15,23,42,0.9)] p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-slate-50 mb-4">Create New Patient Settings?</h3>
+              <p className="text-sm text-slate-400 mb-6">
                 Settings for patient <strong>{pendingPatientId}</strong> do not exist. Would you like to create them now?
                 <br /><br />
                 You will need to configure dose times and pill counts after creation.
@@ -987,7 +1216,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
                 <button
                   onClick={handleCreateSettings}
                   disabled={loading}
-                  className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-sky-500 text-slate-950 rounded-lg hover:bg-sky-400 transition-colors disabled:opacity-50 shadow-md shadow-sky-900/50"
                 >
                   {loading ? 'Creating...' : 'Yes, Create'}
                 </button>
@@ -998,7 +1227,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
                     setLoading(false);
                   }}
                   disabled={loading}
-                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-slate-800 text-slate-200 rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1008,14 +1237,14 @@ const CaregiverDashboard = ({ user, setUser }) => {
         )}
 
         {!settings && !loading && patientId && !showCreateDialog && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="rounded-xl border border-sky-700/60 bg-sky-950/40 p-4">
             <div className="flex items-start">
               <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
               </svg>
               <div>
-                <p className="text-sm font-medium text-blue-900">No patient loaded</p>
-                <p className="text-sm text-blue-700 mt-1">
+                <p className="text-sm font-medium text-sky-100">No patient loaded</p>
+                <p className="text-sm text-sky-300/80 mt-1">
                   Enter a patient ID above and click "Load Patient" to view their data.
                 </p>
               </div>
@@ -1024,8 +1253,8 @@ const CaregiverDashboard = ({ user, setUser }) => {
         )}
 
         {loading && (
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500"></div>
           </div>
         )}
 
@@ -1033,7 +1262,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
           <>
             {/* Active Reminder Banner for Loaded Patient */}
             {activeReminder && activeReminder.patientId === patientId && (
-              <div className="bg-red-50 border-2 border-red-500 rounded-xl p-6 animate-pulse">
+              <div className="bg-red-950/40 border-2 border-rose-500/70 rounded-xl p-6 animate-pulse shadow-lg shadow-rose-900/40">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
                     <div className="text-red-600">
@@ -1042,18 +1271,18 @@ const CaregiverDashboard = ({ user, setUser }) => {
                       </svg>
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-red-900">💊 Medication Reminder</h3>
-                      <p className="text-lg text-red-800 mt-1">
+                      <h3 className="text-xl font-bold text-rose-100">💊 Medication Reminder</h3>
+                      <p className="text-lg text-rose-200 mt-1">
                         Patient <strong>{patientId}</strong> needs to take <strong>{activeReminder.type}</strong> pills now!
                       </p>
-                      <p className="text-sm text-red-700 mt-1">
+                      <p className="text-sm text-rose-300/90 mt-1">
                         Scheduled time: {format(activeReminder.time, 'HH:mm')}
                       </p>
                     </div>
                   </div>
                   <button
                     onClick={() => setActiveReminder(null)}
-                    className="text-red-600 hover:text-red-800"
+                    className="text-rose-400 hover:text-rose-200"
                   >
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1070,8 +1299,8 @@ const CaregiverDashboard = ({ user, setUser }) => {
                   <div
                     key={index}
                     className={`p-4 rounded-lg border-l-4 ${alert.severity === 'high'
-                        ? 'bg-red-50 border-red-500 text-red-800'
-                        : 'bg-yellow-50 border-yellow-500 text-yellow-800'
+                        ? 'bg-rose-950/40 border-rose-500/80 text-rose-100'
+                        : 'bg-amber-950/40 border-amber-500/80 text-amber-100'
                       }`}
                   >
                     <div className="flex items-center">
@@ -1144,20 +1373,115 @@ const CaregiverDashboard = ({ user, setUser }) => {
               />
             </div>
 
+            {/* AI Insights / Risk Prediction */}
+            {mlInsights && (
+              <div className="rounded-xl border border-sky-700/80 bg-slate-950/80 p-6 shadow-[0_0_35px_rgba(56,189,248,0.5)]">
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-50">AI Insights &amp; Risk Prediction</h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Simple ML models (logistic regression, linear regression, decision tree, clustering) running on recent dose history.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-100">Missed Dose Prediction (Logistic Regression)</p>
+                    <p className="text-sm text-slate-300">
+                      Chance of missing the next dose:{' '}
+                      <span className="font-bold">
+                        {Math.round((mlInsights.missPrediction.probability || 0) * 100)}%
+                      </span>{' '}
+                      (
+                      <span
+                        className={
+                          mlInsights.missPrediction.level === 'High'
+                            ? 'text-red-600 font-semibold'
+                            : mlInsights.missPrediction.level === 'Medium'
+                            ? 'text-yellow-600 font-semibold'
+                            : 'text-green-600 font-semibold'
+                        }
+                      >
+                        {mlInsights.missPrediction.level} risk
+                      </span>
+                      ).
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Based on: past miss rate, average delay, and weekly adherence.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-100">Health Risk (Decision Tree)</p>
+                    <p className="text-sm text-slate-300">
+                      Overall adherence risk:{' '}
+                      <span
+                        className={
+                          mlInsights.risk.level === 'High'
+                            ? 'text-red-600 font-semibold'
+                            : mlInsights.risk.level === 'Medium'
+                            ? 'text-yellow-600 font-semibold'
+                            : 'text-green-600 font-semibold'
+                        }
+                      >
+                        {mlInsights.risk.level}
+                      </span>
+                      .
+                    </p>
+                    <p className="text-xs text-slate-400">{mlInsights.risk.message}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-100">Refill Prediction (Linear Regression)</p>
+                    <p className="text-sm text-slate-300">
+                      Morning pills may last approximately:{' '}
+                      <span className="font-semibold">
+                        {mlInsights.refillPrediction.morningDays
+                          ? `${mlInsights.refillPrediction.morningDays} day(s)`
+                          : 'N/A'}
+                      </span>
+                      .
+                    </p>
+                    <p className="text-sm text-slate-300">
+                      Evening pills may last approximately:{' '}
+                      <span className="font-semibold">
+                        {mlInsights.refillPrediction.eveningDays
+                          ? `${mlInsights.refillPrediction.eveningDays} day(s)`
+                          : 'N/A'}
+                      </span>
+                      .
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Estimated from current stock and recent adherence behaviour.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-100">Behaviour Grouping (K-Means Style)</p>
+                    <p className="text-sm text-slate-300">
+                      Current behaviour cluster:{' '}
+                      <span className="font-semibold text-indigo-600">
+                        {mlInsights.cluster.label}
+                      </span>
+                      .
+                    </p>
+                    <p className="text-xs text-slate-400">{mlInsights.cluster.description}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Settings Panel */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Device Settings</h3>
+                  <h3 className="text-lg font-semibold text-slate-50">Device Settings</h3>
                   {settings?.createdAt && !settings?.lastUpdated && (
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-slate-400 mt-1">
                       Settings initialized automatically. Configure dose times and pill count below.
                     </p>
                   )}
                 </div>
                 <button
                   onClick={() => setIsEditing(!isEditing)}
-                  className="px-4 py-2 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
+                  className="px-4 py-2 text-sm font-medium text-sky-300 bg-slate-900/60 border border-sky-500/60 rounded-lg hover:bg-slate-900 hover:text-sky-100 transition-colors"
                 >
                   {isEditing ? 'Cancel' : 'Edit Settings'}
                 </button>
@@ -1167,7 +1491,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
                 <form onSubmit={handleUpdateSettings} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-slate-200 mb-2">
                         Morning Dose Time <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -1176,12 +1500,12 @@ const CaregiverDashboard = ({ user, setUser }) => {
                         onChange={(e) => setFormData({ ...formData, morningDoseTime: e.target.value })}
                         required
                         placeholder="HH:MM (e.g., 11:04)"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+                        className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-400 outline-none"
                       />
-                      <p className="text-xs text-gray-500 mt-1">Format: HH:MM (24-hour)</p>
+                      <p className="text-xs text-slate-500 mt-1">Format: HH:MM (24-hour)</p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-slate-200 mb-2">
                         Evening Dose Time <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -1190,14 +1514,14 @@ const CaregiverDashboard = ({ user, setUser }) => {
                         onChange={(e) => setFormData({ ...formData, eveningDoseTime: e.target.value })}
                         required
                         placeholder="HH:MM (e.g., 21:00)"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+                        className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-400 outline-none"
                       />
-                      <p className="text-xs text-gray-500 mt-1">Format: HH:MM (24-hour)</p>
+                      <p className="text-xs text-slate-500 mt-1">Format: HH:MM (24-hour)</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-slate-200 mb-2">
                         Morning Pill Count <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -1207,11 +1531,11 @@ const CaregiverDashboard = ({ user, setUser }) => {
                         required
                         min="0"
                         placeholder="Enter morning pill count"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+                        className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-400 outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-slate-200 mb-2">
                         Evening Pill Count <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -1221,13 +1545,13 @@ const CaregiverDashboard = ({ user, setUser }) => {
                         required
                         min="0"
                         placeholder="Enter evening pill count"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+                        className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-950/70 text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-400 outline-none"
                       />
                     </div>
                   </div>
                   <button
                     type="submit"
-                    className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                    className="px-6 py-2 bg-sky-500 text-slate-950 rounded-lg hover:bg-sky-400 transition-colors shadow-md shadow-sky-900/50"
                   >
                     Save Settings
                   </button>
@@ -1235,20 +1559,20 @@ const CaregiverDashboard = ({ user, setUser }) => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-sm text-gray-600">Morning Dose Time</p>
-                    <p className="text-lg font-semibold text-gray-900">{settings.morningDoseTime || 'Not set'}</p>
+                    <p className="text-sm text-slate-400">Morning Dose Time</p>
+                    <p className="text-lg font-semibold text-slate-100">{settings.morningDoseTime || 'Not set'}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600">Evening Dose Time</p>
-                    <p className="text-lg font-semibold text-gray-900">{settings.eveningDoseTime || 'Not set'}</p>
+                    <p className="text-sm text-slate-400">Evening Dose Time</p>
+                    <p className="text-lg font-semibold text-slate-100">{settings.eveningDoseTime || 'Not set'}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600">Morning Pills</p>
-                    <p className="text-lg font-semibold text-gray-900">{settings.morningPillCount || 0} pills</p>
+                    <p className="text-sm text-slate-400">Morning Pills</p>
+                    <p className="text-lg font-semibold text-slate-100">{settings.morningPillCount || 0} pills</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600">Evening Pills</p>
-                    <p className="text-lg font-semibold text-gray-900">{settings.eveningPillCount || 0} pills</p>
+                    <p className="text-sm text-slate-400">Evening Pills</p>
+                    <p className="text-lg font-semibold text-slate-100">{settings.eveningPillCount || 0} pills</p>
                   </div>
                 </div>
               )}
@@ -1256,8 +1580,8 @@ const CaregiverDashboard = ({ user, setUser }) => {
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Dose History (Last 7 Days)</h3>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+                <h3 className="text-lg font-semibold text-slate-50 mb-4">Daily Dose History (Last 7 Days)</h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={prepareChartData()}>
                     <CartesianGrid strokeDasharray="3 3" />
@@ -1271,8 +1595,8 @@ const CaregiverDashboard = ({ user, setUser }) => {
                 </ResponsiveContainer>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Adherence Trend</h3>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+                <h3 className="text-lg font-semibold text-slate-50 mb-4">Adherence Trend</h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={prepareChartData()}>
                     <CartesianGrid strokeDasharray="3 3" />
@@ -1288,38 +1612,38 @@ const CaregiverDashboard = ({ user, setUser }) => {
             </div>
 
             {/* Recent Dose History */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Dose History</h3>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+              <h3 className="text-lg font-semibold text-slate-50 mb-4">Recent Dose History</h3>
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                <table className="min-w-full divide-y divide-slate-800">
+                  <thead className="bg-slate-900/80">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dose Type</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delay</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Date & Time</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Dose Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Delay</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-slate-950/60 divide-y divide-slate-800">
                     {doseLogs.slice(0, 10).map((log) => {
                       const logDate = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.createdAt);
                       return (
                         <tr key={log.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-100">
                             {format(logDate, 'MMM dd, yyyy HH:mm')}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                             {log.doseType || 'N/A'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${log.status === 'taken'
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-red-100 text-red-800'
+                                ? 'bg-emerald-500/20 text-emerald-300'
+                                : 'bg-rose-500/20 text-rose-300'
                               }`}>
                               {log.status === 'taken' ? 'Taken' : 'Missed'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                             {formatDelay(log)}
                           </td>
                         </tr>
@@ -1327,7 +1651,7 @@ const CaregiverDashboard = ({ user, setUser }) => {
                     })}
                     {doseLogs.length === 0 && (
                       <tr>
-                        <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">
+                        <td colSpan="4" className="px-6 py-4 text-center text-sm text-slate-500">
                           No dose history available
                         </td>
                       </tr>

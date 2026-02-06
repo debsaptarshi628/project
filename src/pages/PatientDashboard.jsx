@@ -353,9 +353,9 @@ const PatientDashboard = ({ user, setUser }) => {
     return (
       <Layout user={user} setUser={setUser} title="Access Denied">
         <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <p className="text-red-600 font-semibold">Access Denied</p>
-            <p className="text-gray-600 mt-2">Patient access only.</p>
+          <div className="text-center space-y-2">
+            <p className="text-rose-300 font-semibold text-sm tracking-wide">Access Denied</p>
+            <p className="text-slate-400 text-xs">This area is for patients only.</p>
           </div>
         </div>
       </Layout>
@@ -366,7 +366,7 @@ const PatientDashboard = ({ user, setUser }) => {
     return (
       <Layout user={user} setUser={setUser} title="Patient Dashboard">
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500"></div>
         </div>
       </Layout>
     );
@@ -377,17 +377,17 @@ const PatientDashboard = ({ user, setUser }) => {
     return (
       <Layout user={user} setUser={setUser} title="Patient Dashboard">
         <div className="space-y-6">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+          <div className="rounded-xl border border-amber-500/70 bg-amber-950/40 p-6 shadow-lg shadow-amber-900/40">
             <div className="flex items-start">
-              <svg className="w-6 h-6 text-yellow-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+              <svg className="w-6 h-6 text-amber-300 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
               <div>
-                <h3 className="text-lg font-semibold text-yellow-900">Settings Not Configured</h3>
-                <p className="text-sm text-yellow-800 mt-2">
+                <h3 className="text-lg font-semibold text-amber-100">Settings Not Configured</h3>
+                <p className="text-sm text-amber-100/80 mt-2">
                   Your medication settings have not been set up yet. Please contact your caregiver to configure your dose schedule.
                 </p>
-                <p className="text-xs text-yellow-700 mt-2">
+                <p className="text-xs text-amber-200/80 mt-2">
                   Your Patient ID: <strong>{user?.uid}</strong>
                 </p>
               </div>
@@ -413,30 +413,30 @@ const PatientDashboard = ({ user, setUser }) => {
       <div className="space-y-6">
         {/* Active Reminder Banner - Prominent Display */}
         {activeReminder && (
-          <div className="bg-red-50 border-4 border-red-600 rounded-xl p-6 animate-pulse shadow-lg">
+          <div className="bg-rose-950/40 border-4 border-rose-500/80 rounded-xl p-6 animate-pulse shadow-xl shadow-rose-900/60">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <div className="text-red-600 animate-bounce">
+                <div className="text-rose-300 animate-bounce">
                   <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold text-red-900">💊 MEDICATION REMINDER</h3>
-                  <p className="text-xl text-red-800 mt-2 font-semibold">
-                    Time to take your <strong className="text-red-900">{activeReminder.type.toUpperCase()}</strong> pills!
+                  <h3 className="text-2xl font-bold text-rose-50">💊 MEDICATION REMINDER</h3>
+                  <p className="text-xl text-rose-100 mt-2 font-semibold">
+                    Time to take your <strong className="text-rose-50">{activeReminder.type.toUpperCase()}</strong> pills!
                   </p>
-                  <p className="text-base text-red-700 mt-2">
+                  <p className="text-base text-rose-100/80 mt-2">
                     Scheduled time: <strong>{format(activeReminder.time, 'HH:mm')}</strong>
                   </p>
-                  <p className="text-sm text-red-600 mt-2 italic">
+                  <p className="text-sm text-rose-200/80 mt-2 italic">
                     Please take your medication now. The device will detect when you remove the pills.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setActiveReminder(null)}
-                className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-100"
+                className="text-rose-300 hover:text-rose-100 p-2 rounded-lg hover:bg-rose-900/40"
                 title="Dismiss reminder"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -448,13 +448,13 @@ const PatientDashboard = ({ user, setUser }) => {
         )}
 
         {/* Patient Info Banner */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <div className="rounded-xl border border-sky-700/70 bg-sky-950/40 p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-blue-900">Your Account</p>
-              <p className="text-xs text-blue-700 mt-1">Patient ID: {user?.uid}</p>
+              <p className="text-sm font-medium text-sky-100">Your Account</p>
+              <p className="text-xs text-sky-200 mt-1">Patient ID: {user?.uid}</p>
             </div>
-            <div className="text-blue-600">
+            <div className="text-sky-300">
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
@@ -522,40 +522,40 @@ const PatientDashboard = ({ user, setUser }) => {
         </div>
 
         {/* Medication Schedule View */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Your Medication Schedule</h3>
+            <h3 className="text-lg font-semibold text-slate-50">Your Medication Schedule</h3>
             <button
               onClick={handleTestNotification}
-              className="px-4 py-2 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100"
+              className="px-4 py-2 text-sm font-medium text-sky-200 bg-slate-900/60 border border-sky-500/60 rounded-lg hover:bg-slate-900 hover:text-sky-100 transition-colors"
             >
               Test Notification
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-              <p className="text-sm text-gray-500">Morning Dose Time</p>
-              <p className="text-xl font-bold text-gray-900">{settings?.morningDoseTime || 'Not set'}</p>
+            <div className="p-4 bg-slate-900/70 rounded-lg border border-slate-700">
+              <p className="text-sm text-slate-400">Morning Dose Time</p>
+              <p className="text-xl font-bold text-slate-50">{settings?.morningDoseTime || 'Not set'}</p>
             </div>
-            <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-              <p className="text-sm text-gray-500">Evening Dose Time</p>
-              <p className="text-xl font-bold text-gray-900">{settings?.eveningDoseTime || 'Not set'}</p>
+            <div className="p-4 bg-slate-900/70 rounded-lg border border-slate-700">
+              <p className="text-sm text-slate-400">Evening Dose Time</p>
+              <p className="text-xl font-bold text-slate-50">{settings?.eveningDoseTime || 'Not set'}</p>
             </div>
           </div>
         </div>
 
         {/* Notification Permission Banner */}
         {!notificationPermission && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+          <div className="rounded-xl border border-amber-500/70 bg-amber-950/40 p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-6 h-6 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                 </svg>
                 <div>
-                  <p className="text-sm font-medium text-yellow-900">Enable Notifications</p>
-                  <p className="text-xs text-yellow-700">Get reminders even when the website is closed</p>
+                  <p className="text-sm font-medium text-amber-100">Enable Notifications</p>
+                  <p className="text-xs text-amber-200/80">Get reminders even when the website is closed</p>
                 </div>
               </div>
               <button
@@ -568,7 +568,7 @@ const PatientDashboard = ({ user, setUser }) => {
                     toast.error('Please enable notifications in your browser settings.');
                   }
                 }}
-                className="px-4 py-2 bg-yellow-600 text-white text-sm rounded-lg hover:bg-yellow-700"
+                className="px-4 py-2 bg-amber-400 text-slate-950 text-sm rounded-lg hover:bg-amber-300"
               >
                 Enable
               </button>
@@ -578,15 +578,15 @@ const PatientDashboard = ({ user, setUser }) => {
 
         {/* Next Dose Alert */}
         {nextDose && !activeReminder && (
-          <div className="bg-primary-50 border border-primary-200 rounded-xl p-6">
+          <div className="rounded-xl border border-sky-600/70 bg-sky-950/40 p-6 shadow-lg shadow-sky-900/50">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-primary-900">Next Scheduled Dose</h3>
-                <p className="text-2xl font-bold text-primary-700 mt-2">
+                <h3 className="text-lg font-semibold text-sky-100">Next Scheduled Dose</h3>
+                <p className="text-2xl font-bold text-sky-200 mt-2">
                   {nextDose.type} Dose - {format(nextDose.time, 'MMM dd, yyyy')} at {format(nextDose.time, 'HH:mm')}
                 </p>
               </div>
-              <div className="text-primary-600">
+              <div className="text-sky-300">
                 <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -598,24 +598,24 @@ const PatientDashboard = ({ user, setUser }) => {
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Daily Dose Chart */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Dose History (Last 7 Days)</h3>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+            <h3 className="text-lg font-semibold text-slate-50 mb-4">Daily Dose History (Last 7 Days)</h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis dataKey="date" stroke="#9ca3af" />
+                <YAxis stroke="#9ca3af" />
+                <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1f2937', borderRadius: 8 }} />
                 <Legend />
-                <Bar dataKey="taken" fill="#10b981" name="Taken" />
+                <Bar dataKey="taken" fill="#22c55e" name="Taken" />
                 <Bar dataKey="missed" fill="#ef4444" name="Missed" />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           {/* Adherence Pie Chart */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Weekly Adherence Distribution</h3>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+            <h3 className="text-lg font-semibold text-slate-50 mb-4">Weekly Adherence Distribution</h3>
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
@@ -625,36 +625,36 @@ const PatientDashboard = ({ user, setUser }) => {
                   labelLine={false}
                   label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                   outerRadius={80}
-                  fill="#8884d8"
+                  fill="#38bdf8"
                   dataKey="value"
                 >
                   {pieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1f2937', borderRadius: 8 }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Monthly Adherence */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Adherence</h3>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+          <h3 className="text-lg font-semibold text-slate-50 mb-4">Monthly Adherence</h3>
           <div className="flex items-center space-x-4">
             <div className="text-center">
-              <p className="text-4xl font-bold text-primary-600">{adherence.month?.percentage || 0}%</p>
-              <p className="text-sm text-gray-600 mt-1">Adherence Rate</p>
+              <p className="text-4xl font-bold text-sky-400">{adherence.month?.percentage || 0}%</p>
+              <p className="text-sm text-slate-400 mt-1">Adherence Rate</p>
             </div>
             <div className="flex-1 ml-8">
-              <div className="flex justify-between text-sm text-gray-600 mb-2">
+              <div className="flex justify-between text-sm text-slate-400 mb-2">
                 <span>Taken: {adherence.month?.taken || 0}</span>
                 <span>Missed: {adherence.month?.missed || 0}</span>
                 <span>Total: {adherence.month?.total || 0}</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-4">
+              <div className="w-full bg-slate-800 rounded-full h-4">
                 <div
-                  className="bg-primary-600 h-4 rounded-full transition-all"
+                  className="bg-gradient-to-r from-sky-500 via-sky-400 to-emerald-400 h-4 rounded-full transition-all"
                   style={{ width: `${adherence.month?.percentage || 0}%` }}
                 ></div>
               </div>
@@ -663,38 +663,38 @@ const PatientDashboard = ({ user, setUser }) => {
         </div>
 
         {/* Recent Dose History */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Dose History</h3>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/60">
+          <h3 className="text-lg font-semibold text-slate-50 mb-4">Recent Dose History</h3>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+            <table className="min-w-full divide-y divide-slate-800">
+              <thead className="bg-slate-900/80">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dose Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delay</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Date & Time</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Dose Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Delay</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-slate-950/60 divide-y divide-slate-800">
                 {doseLogs.slice(0, 10).map((log) => {
                   const logDate = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.createdAt);
                   return (
-                    <tr key={log.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <tr key={log.id} className="hover:bg-slate-900/60 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-100">
                         {format(logDate, 'MMM dd, yyyy HH:mm')}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                         {log.doseType || 'N/A'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${log.status === 'taken'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : 'bg-rose-500/20 text-rose-300'
                           }`}>
                           {log.status === 'taken' ? 'Taken' : 'Missed'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                         {formatDelay(log)}
                       </td>
                     </tr>
@@ -702,7 +702,7 @@ const PatientDashboard = ({ user, setUser }) => {
                 })}
                 {doseLogs.length === 0 && (
                   <tr>
-                    <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">
+                    <td colSpan="4" className="px-6 py-4 text-center text-sm text-slate-500">
                       No dose history available
                     </td>
                   </tr>
