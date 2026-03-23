@@ -1428,6 +1428,10 @@ async function checkAllPatientReminders() {
 }
 
 // Start background reminder service - checks every 10 seconds for instant notifications
+console.log(`🕒 Reminder service timezone: ${TIME_ZONE}`);
+const startupNow = new Date();
+console.log(`🕒 Current time in ${TIME_ZONE}: ${String(getTimeParts(startupNow).hour).padStart(2, '0')}:${String(getTimeParts(startupNow).minute).padStart(2, '0')}:${String(getTimeParts(startupNow).second).padStart(2, '0')}`);
+console.log(`🕒 Server UTC time: ${startupNow.toISOString()}`);
 setInterval(checkAllPatientReminders, 10000); // 10 seconds for instant emails
 checkAllPatientReminders(); // Run immediately on startup
 
