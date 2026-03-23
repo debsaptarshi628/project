@@ -1,27 +1,18 @@
 // Backend API Server for Email Notifications
-// Uses Nodemailer with Gmail SMTP (works immediately, no domain verification needed)
+// Uses Resend (HTTPS) to avoid SMTP connection timeouts on platforms like Render.
 const express = require('express');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
 const axios = require('axios');
+const { Resend } = require('resend');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Gmail SMTP Configuration
-// You can use your Gmail account or create an App Password
-// To create App Password: Google Account → Security → 2-Step Verification → App Passwords
-const GMAIL_USER = 'debsaptarshi628@gmail.com';
-const GMAIL_APP_PASSWORD = 'ibpuailqtknxsepv';
-
-// Create Nodemailer transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: GMAIL_USER,
-    pass: GMAIL_APP_PASSWORD
-  }
-});
+// Resend API key is hardcoded to avoid needing env vars during deployment.
+// If you regenerate this key in Resend, update it here too.
+const RESEND_API_KEY = 're_N95sU63m_Etv1pSD9Vmb5ecsMkQJi6N1Z';
+const resend = new Resend(RESEND_API_KEY);
+const FROM_EMAIL = 'onboarding@resend.dev';
 
 // Middleware
 // Allow CORS from Netlify frontend and localhost for development
@@ -48,11 +39,11 @@ app.use(cors({
 app.use(express.json());
 
 console.log('📧 Email Notification Server Initialized');
-console.log('   Using Gmail SMTP');
-console.log('   From: ' + GMAIL_USER);
+console.log('   Using Resend API');
+console.log('   From: ' + FROM_EMAIL);
 console.log('');
 
-// Email sending helper function using Nodemailer
+// Email sending helper function using Resend
 async function sendEmail(to, subject, html) {
   if (!to) {
     console.log('No recipient email provided, skipping email.');
@@ -62,36 +53,39 @@ async function sendEmail(to, subject, html) {
   try {
     console.log(`📧 Attempting to send email to: ${to}`);
     console.log(`   Subject: ${subject}`);
-    
-    const mailOptions = {
-      from: `"SeniorPill" <${GMAIL_USER}>`,
-      to: to,
-      subject: subject,
-      html: html,
-    };
 
-    const result = await transporter.sendMail(mailOptions);
-    
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html,
+    });
+
+    if (result?.error) {
+      console.error('❌ Resend returned an error:', result.error);
+      return { success: false, error: result.error.message || 'Resend error' };
+    }
+
     console.log(`✅ Email sent successfully!`);
-    console.log(`   Message ID: ${result.messageId}`);
+    console.log(`   Message ID: ${result?.data?.id}`);
     console.log(`   To: ${to}`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       data: {
-        messageId: result.messageId,
-        response: result.response
+        messageId: result?.data?.id,
+        response: result,
       },
       actualRecipient: to,
-      originalRecipient: to
+      originalRecipient: to,
     };
   } catch (error) {
     console.error('❌ Error sending email:', error.message);
-    console.error('   Full error:', error);
-    
-    return { 
-      success: false, 
-      error: error.message || 'Unknown error occurred'
+    if (error.response) console.error('   Response:', error.response);
+
+    return {
+      success: false,
+      error: error.message || 'Unknown error occurred',
     };
   }
 }
