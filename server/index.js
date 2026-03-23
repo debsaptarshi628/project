@@ -435,9 +435,31 @@ const sentEmails = {
 };
 
 // Helper to format date as YYYY-MM-DD
+// IMPORTANT:
+// Reminders depend on "today" and the current hour/min/sec.
+// Render (and Node) uses the server timezone, so we must compute these in a fixed timezone.
+// Update this value if your dose times are based on a different timezone.
+const TIME_ZONE = 'Asia/Kolkata'; // IST (UTC+5:30)
+
 function formatDate(date) {
-  const d = new Date(date);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // en-CA gives YYYY-MM-DD in the specified timeZone.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(new Date(date));
+}
+
+function getTimeParts(date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(date));
+
+  const hour = Number(parts.find(p => p.type === 'hour')?.value);
+  const minute = Number(parts.find(p => p.type === 'minute')?.value);
+  const second = Number(parts.find(p => p.type === 'second')?.value);
+
+  return { hour, minute, second };
 }
 
 // Get all settings documents (all patients)
@@ -648,9 +670,7 @@ async function checkAllPatientReminders() {
     
     const now = new Date();
     const today = formatDate(now);
-    const currentHour = now.getHours();
-    const currentMin = now.getMinutes();
-    const currentSec = now.getSeconds();
+    const { hour: currentHour, minute: currentMin, second: currentSec } = getTimeParts(now);
     
     for (const patient of patients) {
       const pId = patient.customUID || patient.id;
