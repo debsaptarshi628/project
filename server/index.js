@@ -1,6 +1,5 @@
 // Backend API Server for Email Notifications
 // Uses Nodemailer with Gmail SMTP (works immediately, no domain verification needed)
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
@@ -12,8 +11,8 @@ const PORT = process.env.PORT || 3001;
 // Gmail SMTP Configuration
 // You can use your Gmail account or create an App Password
 // To create App Password: Google Account → Security → 2-Step Verification → App Passwords
-const GMAIL_USER = process.env.GMAIL_USER || 'debsaptarshi628@gmail.com';
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || 'ibpuailqtknxsepv';
+const GMAIL_USER = 'debsaptarshi628@gmail.com';
+const GMAIL_APP_PASSWORD = 'ibpuailqtknxsepv';
 
 // Create Nodemailer transporter
 const transporter = nodemailer.createTransport({

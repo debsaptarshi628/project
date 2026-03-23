@@ -1,7 +1,12 @@
 // Email Notification Utilities
 // Sends emails to caregivers via the backend API
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Hardcoded (no Netlify env vars needed). Uses local backend URL when running on localhost.
+const API_BASE_URL =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3001'
+    : 'https://seniorpill-email-server.onrender.com';
 
 /**
  * Send reminder email to caregiver with all patient details
