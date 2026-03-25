@@ -16,12 +16,28 @@ const GMAIL_APP_PASSWORD = 'ibpuailqtknxsepv';
 
 // Create Nodemailer transporter
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // 465 uses TLS by default
   auth: {
     user: GMAIL_USER,
-    pass: GMAIL_APP_PASSWORD
-  }
+    pass: GMAIL_APP_PASSWORD,
+  },
+  // Keep TLS strict (prevents silent auth issues)
+  tls: {
+    rejectUnauthorized: true,
+  },
 });
+
+// Verify SMTP credentials at startup (so auth errors show immediately in logs)
+transporter
+  .verify()
+  .then(() => {
+    console.log('✅ SMTP authentication verified successfully');
+  })
+  .catch((err) => {
+    console.error('❌ SMTP authentication verification failed:', err.message);
+  });
 
 // Middleware
 // Allow CORS from Netlify frontend and localhost for development
