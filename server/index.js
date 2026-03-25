@@ -12,32 +12,57 @@ const PORT = process.env.PORT || 3001;
 // You can use your Gmail account or create an App Password
 // To create App Password: Google Account → Security → 2-Step Verification → App Passwords
 const GMAIL_USER = 'debsaptarshi628@gmail.com';
-const GMAIL_APP_PASSWORD = 'ibpuailqtknxsepv';
+const GMAIL_APP_PASSWORD = 'zpqvxbajrhtyezsf';
 
-// Create Nodemailer transporter
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // 465 uses TLS by default
-  auth: {
-    user: GMAIL_USER,
-    pass: GMAIL_APP_PASSWORD,
-  },
-  // Keep TLS strict (prevents silent auth issues)
-  tls: {
-    rejectUnauthorized: true,
-  },
-});
+// Nodemailer SMTP (Gmail)
+// Gmail requires an App Password when using SMTP. "Invalid login" usually means:
+// - the App Password is wrong/expired, or
+// - 2-Step Verification is not enabled on the Gmail account.
+let transporter = null;
+let smtpReady = false;
 
-// Verify SMTP credentials at startup (so auth errors show immediately in logs)
-transporter
-  .verify()
-  .then(() => {
-    console.log('✅ SMTP authentication verified successfully');
-  })
-  .catch((err) => {
-    console.error('❌ SMTP authentication verification failed:', err.message);
-  });
+const smtpInitPromise = (async () => {
+  const configs = [
+    // Preferred: TLS on 465
+    {
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+      tls: { rejectUnauthorized: true },
+    },
+    // Fallback: STARTTLS on 587
+    {
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+      tls: { rejectUnauthorized: true },
+    },
+  ];
+
+  let lastError = null;
+  for (const cfg of configs) {
+    const candidate = nodemailer.createTransport(cfg);
+    try {
+      await candidate.verify();
+      transporter = candidate;
+      smtpReady = true;
+      console.log(`✅ SMTP authentication verified (port ${cfg.port})`);
+      break;
+    } catch (err) {
+      lastError = err;
+      console.error(`❌ SMTP auth verify failed (port ${cfg.port}):`, err.message);
+    }
+  }
+
+  if (!smtpReady) {
+    console.error(
+      '❌ SMTP is not authenticated. Update GMAIL_APP_PASSWORD with a valid Gmail App Password (enable 2FA first).'
+    );
+    if (lastError) console.error('   Last error:', lastError.message);
+  }
+})();
 
 // Middleware
 // Allow CORS from Netlify frontend and localhost for development
@@ -76,6 +101,15 @@ async function sendEmail(to, subject, html) {
   }
 
   try {
+    // Ensure SMTP transport is authenticated before attempting to send.
+    await smtpInitPromise;
+    if (!smtpReady || !transporter) {
+      return {
+        success: false,
+        error: 'SMTP authentication failed. Check Gmail App Password / 2-Step Verification settings.',
+      };
+    }
+
     console.log(`📧 Attempting to send email to: ${to}`);
     console.log(`   Subject: ${subject}`);
     
@@ -451,31 +485,9 @@ const sentEmails = {
 };
 
 // Helper to format date as YYYY-MM-DD
-// IMPORTANT:
-// Reminders depend on "today" and the current hour/min/sec.
-// Render (and Node) uses the server timezone, so we must compute these in a fixed timezone.
-// Update this value if your dose times are based on a different timezone.
-const TIME_ZONE = 'Asia/Kolkata'; // IST (UTC+5:30)
-
 function formatDate(date) {
-  // en-CA gives YYYY-MM-DD in the specified timeZone.
-  return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(new Date(date));
-}
-
-function getTimeParts(date) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: TIME_ZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(date));
-
-  const hour = Number(parts.find(p => p.type === 'hour')?.value);
-  const minute = Number(parts.find(p => p.type === 'minute')?.value);
-  const second = Number(parts.find(p => p.type === 'second')?.value);
-
-  return { hour, minute, second };
+  const d = new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // Get all settings documents (all patients)
@@ -686,7 +698,9 @@ async function checkAllPatientReminders() {
     
     const now = new Date();
     const today = formatDate(now);
-    const { hour: currentHour, minute: currentMin, second: currentSec } = getTimeParts(now);
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+    const currentSec = now.getSeconds();
     
     for (const patient of patients) {
       const pId = patient.customUID || patient.id;
@@ -1444,10 +1458,6 @@ async function checkAllPatientReminders() {
 }
 
 // Start background reminder service - checks every 10 seconds for instant notifications
-console.log(`🕒 Reminder service timezone: ${TIME_ZONE}`);
-const startupNow = new Date();
-console.log(`🕒 Current time in ${TIME_ZONE}: ${String(getTimeParts(startupNow).hour).padStart(2, '0')}:${String(getTimeParts(startupNow).minute).padStart(2, '0')}:${String(getTimeParts(startupNow).second).padStart(2, '0')}`);
-console.log(`🕒 Server UTC time: ${startupNow.toISOString()}`);
 setInterval(checkAllPatientReminders, 10000); // 10 seconds for instant emails
 checkAllPatientReminders(); // Run immediately on startup
 
