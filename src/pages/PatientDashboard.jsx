@@ -9,9 +9,10 @@ import {
   subscribeToDeviceSettings,
   subscribeToDoseLogs,
   calculateAdherence,
-  getUser
+  getUser,
+  setCustomUID
 } from '../firebase/database';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { format, isAfter, parse, isBefore, differenceInMinutes, differenceInSeconds } from 'date-fns';
@@ -58,7 +59,7 @@ const PatientDashboard = ({ user, setUser }) => {
         const userData = await getUser(user.uid);
         let customUID = userData?.customUID;
 
-        // Fallback: If customUID not in users doc, try to find it from settings
+        // Fallback 1: Try to find it from settings by firebaseUID
         if (!customUID) {
           try {
             const settingsRef = collection(db, 'settings');
@@ -84,18 +85,47 @@ const PatientDashboard = ({ user, setUser }) => {
           }
         }
 
+        // Fallback 2 (MAIN FIX): Find settings by patient email (caregiver assigns UID; patient logs in with email)
+        if (!customUID) {
+          try {
+            const patientEmail = user?.email;
+            if (patientEmail) {
+              const settingsRef = collection(db, 'settings');
+              const qEmail = query(settingsRef, where('patientEmail', '==', patientEmail));
+              const snapEmail = await getDocs(qEmail);
+
+              if (!snapEmail.empty) {
+                const settingsDoc = snapEmail.docs[0];
+                const settingsData = settingsDoc.data();
+                customUID = settingsData.customUID || settingsDoc.id;
+                console.log('Found customUID from settings by patientEmail:', customUID);
+
+                // Link uid<->customUID for future logins (also creates mirror settings/{uid})
+                try {
+                  await setCustomUID(user.uid, customUID, settingsData.caregiverEmail || null, settingsData.caregiverUID || null, patientEmail);
+                } catch (linkErr) {
+                  console.error('Could not link uid to customUID via setCustomUID:', linkErr);
+                }
+              }
+            }
+          } catch (emailLookupErr) {
+            console.error('Error in patientEmail lookup:', emailLookupErr);
+          }
+        }
+
         if (!customUID) {
           setSettingsNotFound(true);
           setLoading(false);
-          toast.error('Custom Patient ID not assigned. Please contact your caregiver.');
+          toast.error('Patient account is not linked yet. Please ask caregiver to assign your Custom Patient ID.');
           return;
         }
 
-        // Use custom UID to load settings
-        loadData(customUID);
+        // With the original Firestore rules, patients can reliably read `/settings/{uid}`.
+        // We mirror settings into that document id for compatibility.
+        loadData(user.uid);
 
-        // Subscribe to real-time updates using custom UID
-        unsubscribeSettings = subscribeToDeviceSettings(customUID, (data) => {
+        // Subscribe to real-time updates using the mirrored settings doc (uid)
+        unsubscribeSettings = subscribeToDeviceSettings(user.uid, (data) => {
           if (data) {
             setSettings(data);
             setSettingsNotFound(false);
@@ -104,10 +134,32 @@ const PatientDashboard = ({ user, setUser }) => {
           }
         });
 
-        unsubscribeLogs = subscribeToDoseLogs(customUID, (logs) => {
+        // Dose logs under old rules typically match `patientId == request.auth.uid`.
+        // If your hardware writes logs using customUID (e.g., U1), those logs won't be readable for patients
+        // unless mirrored. We still subscribe using uid for rule-compatibility.
+        unsubscribeLogs = subscribeToDoseLogs(user.uid, (logs) => {
           setDoseLogs(logs);
-          updateAdherence(customUID, logs);
+          updateAdherence(user.uid, logs);
         });
+
+        // If we discovered a customUID via settings lookup, ensure the mirror settings doc exists.
+        // This is what makes the banner disappear under the original rules.
+        if (customUID) {
+          try {
+            const mirrorRef = doc(db, 'settings', user.uid);
+            await setDoc(
+              mirrorRef,
+              {
+                firebaseUID: user.uid,
+                customUID,
+                deviceId: customUID,
+              },
+              { merge: true }
+            );
+          } catch (mirrorErr) {
+            console.error('Failed to create/update mirrored settings doc:', mirrorErr);
+          }
+        }
       } catch (error) {
         console.error('Error loading patient data:', error);
         setSettingsNotFound(true);
@@ -385,10 +437,10 @@ const PatientDashboard = ({ user, setUser }) => {
               <div>
                 <h3 className="text-lg font-semibold text-amber-100">Settings Not Configured</h3>
                 <p className="text-sm text-amber-100/80 mt-2">
-                  Your medication settings have not been set up yet. Please contact your caregiver to configure your dose schedule.
+                  Your medication settings are not linked to this account yet. Please contact your caregiver to assign your Custom Patient ID to your email.
                 </p>
                 <p className="text-xs text-amber-200/80 mt-2">
-                  Your Patient ID: <strong>{user?.uid}</strong>
+                  Logged in email: <strong>{user?.email || 'N/A'}</strong>
                 </p>
               </div>
             </div>
