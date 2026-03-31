@@ -76,8 +76,15 @@ export const getPatientByCustomUID = async (customUID) => {
  * @param {string} customUID - Custom patient ID (e.g., U1, U101)
  * @param {string} caregiverEmail - Email of the caregiver assigning this patient
  * @param {string} caregiverUID - UID of the caregiver
+ * @param {string} patientEmail - Email of the patient account (used for auto-link on login)
  */
-export const setCustomUID = async (firebaseUID, customUID, caregiverEmail = null, caregiverUID = null) => {
+export const setCustomUID = async (
+  firebaseUID,
+  customUID,
+  caregiverEmail = null,
+  caregiverUID = null,
+  patientEmail = null
+) => {
   try {
     // Check if custom UID already exists
     const existingPatient = await getPatientByCustomUID(customUID);
@@ -88,7 +95,8 @@ export const setCustomUID = async (firebaseUID, customUID, caregiverEmail = null
     // Update user document with custom UID
     const userRef = doc(db, COLLECTIONS.USERS, firebaseUID);
     await updateDoc(userRef, {
-      customUID: customUID
+      customUID: customUID,
+      ...(patientEmail && { email: patientEmail })
     });
     
     // Also store in settings document for easy lookup
@@ -105,6 +113,7 @@ export const setCustomUID = async (firebaseUID, customUID, caregiverEmail = null
       eveningDoseTime: null,
       morningPillCount: 0,
       eveningPillCount: 0,
+        ...(patientEmail && { patientEmail }),
         caregiverEmail: caregiverEmail,
         caregiverUID: caregiverUID,
         deviceStatus: "offline",
@@ -118,10 +127,27 @@ export const setCustomUID = async (firebaseUID, customUID, caregiverEmail = null
       await updateDoc(settingsRef, {
         firebaseUID: firebaseUID,
         customUID: customUID,
+        ...(patientEmail && { patientEmail }),
         ...(caregiverEmail && { caregiverEmail: caregiverEmail }),
         ...(caregiverUID && { caregiverUID: caregiverUID })
       });
     }
+
+    // IMPORTANT (rules compatibility):
+    // Old Firestore rules allow patients to read `/settings/{request.auth.uid}`.
+    // Your actual settings live at `/settings/{customUID}` (e.g., U1), so we mirror a copy at `/settings/{firebaseUID}`.
+    // This allows the Patient Dashboard to load settings without changing security rules.
+    const mirrorSettingsRef = doc(db, COLLECTIONS.SETTINGS, firebaseUID);
+    const mirrorPayload = {
+      firebaseUID,
+      customUID,
+      deviceId: customUID,
+      ...(patientEmail && { patientEmail }),
+      ...(caregiverEmail && { caregiverEmail }),
+      ...(caregiverUID && { caregiverUID }),
+      lastUpdated: serverTimestamp(),
+    };
+    await setDoc(mirrorSettingsRef, mirrorPayload, { merge: true });
     
     return true;
   } catch (error) {
@@ -181,7 +207,34 @@ export const getDeviceSettings = async (patientId) => {
   const settingsDoc = await getDoc(settingsRef);
   
   if (settingsDoc.exists()) {
-    return { id: settingsDoc.id, ...settingsDoc.data() };
+    const data = { id: settingsDoc.id, ...settingsDoc.data() };
+
+    // Compatibility with the *previous* Firestore rules:
+    // Patients can read only `/settings/{request.auth.uid}`.
+    // But caregiver/admin data is stored at `/settings/{customUID}` (e.g., U1).
+    // If this doc contains a `firebaseUID`, mirror the full settings into `/settings/{firebaseUID}`
+    // so the patient dashboard can read it without changing rules.
+    try {
+      const firebaseUID = data.firebaseUID;
+      if (firebaseUID && firebaseUID !== settingsDoc.id) {
+        const mirrorRef = doc(db, COLLECTIONS.SETTINGS, firebaseUID);
+        await setDoc(
+          mirrorRef,
+          {
+            ...data,
+            id: firebaseUID,
+            deviceId: data.customUID || data.deviceId || settingsDoc.id,
+            lastUpdated: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    } catch (mirrorErr) {
+      // Mirroring is best-effort; if it fails we still return the caregiver-visible data.
+      console.error('Error mirroring settings to firebaseUID doc:', mirrorErr);
+    }
+
+    return data;
   }
   
   // If not found, try to find by firebaseUID field
