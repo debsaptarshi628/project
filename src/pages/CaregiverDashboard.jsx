@@ -596,8 +596,8 @@ const CaregiverDashboard = ({ user, setUser }) => {
     try {
       const customUIDUpper = customUID.trim().toUpperCase();
 
-      // Set custom UID mapping with caregiver email
-      await setCustomUID(newPatientFirebaseUID, customUIDUpper, user?.email, user?.uid);
+      // Set custom UID mapping with caregiver + patient email (used for auto-link on patient login)
+      await setCustomUID(newPatientFirebaseUID, customUIDUpper, user?.email, user?.uid, newPatientForm.email);
 
       // Create settings for the new patient using custom UID
       const newSettings = await createDeviceSettings(customUIDUpper, {
